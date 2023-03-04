@@ -11,13 +11,11 @@
     #define DEBUG_PRINT(msg)       Serial.print(msg)
     #define DEBUG_PRINTF(msg, ...) Serial.print(msg)
 #else
-
-    #define USE_TIME_BIAS
-
     #include "stdio.h"
     #include <sys/time.h>
     #include "malloc.h"
 
+    #define USE_TIME_BIAS
     #define yield()
     #define DEBUG_PRINTF(_Format, ...) printf(_Format, __VA_ARGS__)
     #define DEBUG_PRINT(msg)           printf(msg)
