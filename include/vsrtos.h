@@ -8,12 +8,16 @@
 
 #include "stdint.h"
 
+typedef enum {
+    VSRTOS_RESULT_OK = 0,
+    VSRTOS_RESULT_NOT_ENOUGH_MEMORY
+} vsrtos_result_t;
 
 typedef void (*task_function)();
 
 typedef struct {
     task_function update;
-    char          name[10];
+    char          name[20];
     uint16_t      frequency;
     uint8_t       priority;
     uint16_t      delay_ms;
@@ -37,7 +41,7 @@ Creates a new task block on the heap.
     frequency: Call frequency of the task (in hertz)
     priority: Priority of the task, higher number means higher priority
 */
-void vsrtos_create_task(task_function update, const char* name, const uint16_t frequency, const uint8_t priority);
+vsrtos_result_t vsrtos_create_task(task_function update, const char* name, const uint16_t frequency, const uint8_t priority);
 
 /*
 Starts the scheduler.

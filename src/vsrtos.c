@@ -2,23 +2,25 @@
 
 #include "string.h"
 #include "stdbool.h"
-#include "malloc.h"
 
 
 // -- Platform specific definitions //
 #ifdef ARDUINO
-    #define currentTime() millis()
-    #define print() (Serial.print())
+    #include <Arduino.h>
+    #define currentTime()          millis()
+    #define DEBUG_PRINT(msg)       Serial.print(msg)
+    #define DEBUG_PRINTF(msg, ...) Serial.print(msg)
 #else
 
     #define USE_TIME_BIAS
 
     #include "stdio.h"
     #include <sys/time.h>
+    #include "malloc.h"
 
-    #define F(msg) msg
-    #define print(msg) printf(msg)
     #define yield()
+    #define DEBUG_PRINTF(_Format, ...) printf(_Format, __VA_ARGS__)
+    #define DEBUG_PRINT(msg)           printf(msg)
 
     static uint64_t timeBias = 0;
 
@@ -52,6 +54,7 @@ static bool is_init = false;
 // Helper functions
 static task_t* getNextTask();
 static task_block_t* getPrevTaskBlockWithHigherPriority(const uint8_t priority);
+static vsrtos_result_t create_task(task_block_t* new_task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority);
 
 
 // -- Public functions -- //
@@ -59,14 +62,59 @@ static task_block_t* getPrevTaskBlockWithHigherPriority(const uint8_t priority);
 void printTasks() {
     task_block_t* t = tasks_head;
     while (t != NULL) {
-        printf("[%d] %s - %d Hz, delay_ms: %d\n", t->task.priority, t->task.name, t->task.frequency, t->task.delay_ms);
+        DEBUG_PRINTF("[%d] %s - %d Hz, delay_ms: %d\n", t->task.priority, t->task.name, t->task.frequency, t->task.delay_ms);
         t = t->next;
     }
 }
 
-void vsrtos_create_task(task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
+vsrtos_result_t vsrtos_create_task_static(task_block_t* task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
+    return create_task(task_block, update, name, frequency, priority);
+}
+
+vsrtos_result_t vsrtos_create_task(task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
     // Create task struct and set update function, name, frequency etc
     task_block_t* new_task_block = (task_block_t*) malloc(sizeof(task_block_t));
+    if (new_task_block == NULL) {
+        return VSRTOS_RESULT_NOT_ENOUGH_MEMORY;
+    }
+    return create_task(new_task_block, update, name, frequency, priority);
+}
+
+void vsrtos_scheduler_start() {
+    if (is_init) {
+        DEBUG_PRINT("Scheduler already started!");
+        return;
+    }
+
+    #ifdef USE_TIME_BIAS
+        timeBias = currentTime();
+    #endif
+
+    is_init = true;
+    DEBUG_PRINT("Scheduler starting\n");
+
+    while (1) {
+        task_t* next_task = getNextTask();
+
+        if (next_task == IDLE_TASK) {
+            // Not much to do, we're just idling.
+            yield();
+            continue;
+        }
+
+        next_task->last_called = currentTime();
+        next_task->update();
+        next_task->times_executed++;
+        next_task->last_executed = currentTime();
+        DEBUG_PRINTF("[%d] last_called: %ld, last_exe: %ld Running task: %s\n", next_task->priority, next_task->last_called, next_task->last_executed, next_task->name);
+    }
+
+}
+
+
+
+// -- Private -- /
+static vsrtos_result_t create_task(task_block_t* new_task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
     strcpy(new_task_block->task.name, name);
     new_task_block->task.update         = update;
     new_task_block->task.priority       = priority;
@@ -96,48 +144,12 @@ void vsrtos_create_task(task_function update, const char* name, const uint16_t f
     }
 
     nbr_of_tasks++;
+    return VSRTOS_RESULT_OK;
 }
-
-
-void vsrtos_scheduler_start() {
-    if (is_init) {
-        print(F("Scheduler already started!"));
-        return;
-    }
-
-    #ifdef USE_TIME_BIAS
-        timeBias = currentTime();
-    #endif
-
-    is_init = true;
-    print(F("Scheduler starting\n"));
-
-    while (1) {
-        task_t* next_task = getNextTask();
-
-        if (next_task == IDLE_TASK) {
-            // Not much to do, we're just idling.
-            yield();
-            continue;
-        }
-
-        next_task->last_called = currentTime();
-        next_task->update();
-        next_task->times_executed++;
-        next_task->last_executed = currentTime();
-        printf("[%d] last_called: %ld, last_exe: %ld Running task: %s\n", next_task->priority, next_task->last_called, next_task->last_executed, next_task->name);
-        fflush(stdout);
-    }
-
-}
-
-
-
-// -- Private -- /
 
 static task_t* getNextTask() {
     if (tasks_head == NULL) {
-        printf("HEAD IS NULL\n");
+        DEBUG_PRINT("HEAD IS NULL\n");
         return NULL;
     }
 
