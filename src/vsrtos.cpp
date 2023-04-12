@@ -7,10 +7,20 @@
 // -- Platform specific definitions //
 #ifdef ARDUINO
     #include <Arduino.h>
-    #define currentTime()          millis()
+    #define current_time_us()      micros()
     #define DEBUG_PRINT(msg)       Serial.print(msg)
     #define DEBUG_PRINTF(msg, ...) Serial.print(msg)
-#else
+#endif
+#ifdef RP2040
+    #include "stdio.h"
+    #include "stdlib.h"
+    #include "pico/stdlib.h"
+    #define yield()
+    #define current_time_us()         (time_us_32())
+    #define DEBUG_PRINTF(_Format, ...) printf(_Format, __VA_ARGS__)
+    #define DEBUG_PRINT(msg)           printf(msg)
+#endif
+#ifdef LINUX
     #include "stdio.h"
     #include <sys/time.h>
     #include "malloc.h"
@@ -20,12 +30,12 @@
     #define DEBUG_PRINTF(_Format, ...) printf(_Format, __VA_ARGS__)
     #define DEBUG_PRINT(msg)           printf(msg)
 
-    static uint64_t timeBias = 0;
+    static uint32_t timeBias = 0;
 
-    unsigned long currentTime() {
+    unsigned long current_time_us() {
         struct timeval tv;
         gettimeofday(&tv,NULL);
-        uint64_t now = (((uint64_t) tv.tv_sec)*1000)+(tv.tv_usec/1000);
+        uint32_t now = (((uint32_t) tv.tv_sec)*1000)+(tv.tv_usec/1000);
         return now - timeBias;
     }
 
@@ -50,7 +60,7 @@ static bool is_init = false;
 #define IDLE_TASK NULL
 
 // Helper functions
-static task_t* getNextTask();
+static task_t* get_next_task();
 static task_block_t* getPrevTaskBlockWithHigherPriority(const uint8_t priority);
 static vsrtos_result_t create_task(task_block_t* new_task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority);
 
@@ -60,7 +70,7 @@ static vsrtos_result_t create_task(task_block_t* new_task_block, task_function u
 void printTasks() {
     task_block_t* t = tasks_head;
     while (t != NULL) {
-        DEBUG_PRINTF("[%d] %s - %d Hz, delay_ms: %d\n", t->task.priority, t->task.name, t->task.frequency, t->task.delay_ms);
+        DEBUG_PRINTF("[%d] %s - %d Hz, delay_us: %d\n", t->task.priority, t->task.name, t->task.frequency, t->task.delay_us);
         t = t->next;
     }
 }
@@ -80,19 +90,21 @@ vsrtos_result_t vsrtos_create_task(task_function update, const char* name, const
 
 void vsrtos_scheduler_start() {
     if (is_init) {
-        DEBUG_PRINT("Scheduler already started!");
+        DEBUG_PRINT("Scheduler already started!\n");
         return;
     }
 
     #ifdef USE_TIME_BIAS
-        timeBias = currentTime();
+        timeBias = current_time_us();
     #endif
 
     is_init = true;
     DEBUG_PRINT("Scheduler starting\n");
 
+    uint32_t t0 = current_time_us();
+
     while (1) {
-        task_t* next_task = getNextTask();
+        task_t* next_task = get_next_task();
 
         if (next_task == IDLE_TASK) {
             // Not much to do, we're just idling.
@@ -100,11 +112,10 @@ void vsrtos_scheduler_start() {
             continue;
         }
 
-        next_task->last_called = currentTime();
+        next_task->last_called = current_time_us();
         next_task->update();
+        next_task->last_finished = current_time_us();
         next_task->times_executed++;
-        next_task->last_executed = currentTime();
-        DEBUG_PRINTF("[%d] last_called: %ld, last_exe: %ld Running task: %s\n", next_task->priority, next_task->last_called, next_task->last_executed, next_task->name);
     }
 
 }
@@ -117,9 +128,9 @@ static vsrtos_result_t create_task(task_block_t* new_task_block, task_function u
     new_task_block->task.update         = update;
     new_task_block->task.priority       = priority;
     new_task_block->task.frequency      = frequency;
-    new_task_block->task.delay_ms       = 1000.0 / frequency;
+    new_task_block->task.delay_us       = 1000000.0 / frequency;
     new_task_block->task.last_called    = 0;
-    new_task_block->task.last_executed  = 0;
+    new_task_block->task.last_finished  = 0;
     new_task_block->task.times_executed = 0;
     new_task_block->task.id             = nbr_of_tasks;
 
@@ -145,20 +156,20 @@ static vsrtos_result_t create_task(task_block_t* new_task_block, task_function u
     return VSRTOS_RESULT_OK;
 }
 
-static task_t* getNextTask() {
+static task_t* get_next_task() {
     if (tasks_head == NULL) {
         DEBUG_PRINT("HEAD IS NULL\n");
         return NULL;
     }
 
-    unsigned long now = currentTime();
+    uint32_t now = current_time_us();
     task_block_t* curr = tasks_head;
     bool found_task_to_run = false;
 
     while (curr != NULL && !found_task_to_run) {
-        unsigned long dt = now - curr->task.last_executed;
+        uint32_t dt = now - curr->task.last_called;
 
-        if (dt > curr->task.delay_ms) {
+        if (dt > curr->task.delay_us) {
             // Enough time has passed since this task executed, so it's time to execute this task.
             found_task_to_run = true;
         } else if (curr->task.times_executed == 0) {

@@ -15,20 +15,21 @@ typedef enum {
 
 typedef void (*task_function)();
 
+// uint32 Timestamps in us gives us:
+//   0xffffffff / (10^6) ≃ 4294.97 seconds
+//   4294.97 / 60 ≃ 71.58 minutes
 typedef struct {
     task_function update;
     char          name[20];
     uint16_t      frequency;
     uint8_t       priority;
-    uint16_t      delay_ms;
-    uint64_t      last_called;
-    uint64_t      last_executed;
+    uint32_t      delay_us;
+    uint32_t      last_called;
+    uint32_t      last_finished;
     uint16_t      times_executed;
     uint8_t       id;
 } task_t;
 
-/* Returns the current time of the system since started. */
-uint64_t currentTime();
 
 /* Prints information about all active tasks. Mainly used for debugging. */
 void printTasks();
