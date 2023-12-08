@@ -15,6 +15,12 @@ typedef enum {
 
 typedef void (*task_function)();
 
+class VTask
+{
+    public:
+        virtual void update() = 0;
+};
+
 // uint32 Timestamps in us gives us:
 //   0xffffffff / (10^6) ≃ 4294.97 seconds
 //   4294.97 / 60 ≃ 71.58 minutes
