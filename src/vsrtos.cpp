@@ -24,6 +24,8 @@
     #include "stdio.h"
     #include <sys/time.h>
     #include "malloc.h"
+    #include <ctime>
+    #include "time.h"
 
     #define USE_TIME_BIAS
     #define yield()
@@ -33,10 +35,9 @@
     static uint32_t timeBias = 0;
 
     unsigned long current_time_us() {
-        struct timeval tv;
-        gettimeofday(&tv,NULL);
-        uint32_t now = (((uint32_t) tv.tv_sec)*1000)+(tv.tv_usec/1000);
-        return now - timeBias;
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        return (ts.tv_sec * 1000000 + ts.tv_nsec / 1000) - timeBias;
     }
 
 #endif
@@ -64,7 +65,7 @@ static bool is_init = false;
 // Helper functions
 static task_t* get_next_task();
 static task_block_t* getPrevTaskBlockWithHigherPriority(const uint8_t priority);
-static vsrtos_result_t create_task(task_block_t* new_task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority);
+static vsrtos_result_t create_task(task_block_t* new_task_block, vsrtos_update update, const char* name, const uint16_t frequency, const uint8_t priority);
 
 
 // -- Public functions -- //
@@ -77,11 +78,11 @@ void printTasks() {
     }
 }
 
-vsrtos_result_t vsrtos_create_task_static(task_block_t* task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
+vsrtos_result_t vsrtos_create_task_static(task_block_t* task_block, vsrtos_update update, const char* name, const uint16_t frequency, const uint8_t priority) {
     return create_task(task_block, update, name, frequency, priority);
 }
 
-vsrtos_result_t vsrtos_create_task(task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
+vsrtos_result_t vsrtos_create_task(vsrtos_update update, const char* name, const uint16_t frequency, const uint8_t priority) {
     // Create task struct and set update function, name, frequency etc
     task_block_t* new_task_block = (task_block_t*) malloc(sizeof(task_block_t));
     if (new_task_block == NULL) {
@@ -130,7 +131,7 @@ void vsrtos_scheduler_start() {
         #endif
 
         next_task->last_called = current_time_us();
-        next_task->update();
+        vsrtos_task_update(next_task->update);
         next_task->last_finished = current_time_us();
         next_task->times_executed++;
         next_task->times_executed_per_sec++;
@@ -141,7 +142,7 @@ void vsrtos_scheduler_start() {
 
 
 // -- Private -- /
-static vsrtos_result_t create_task(task_block_t* new_task_block, task_function update, const char* name, const uint16_t frequency, const uint8_t priority) {
+static vsrtos_result_t create_task(task_block_t* new_task_block, vsrtos_update update, const char* name, const uint16_t frequency, const uint8_t priority) {
     strcpy(new_task_block->task.name, name);
     new_task_block->task.update         = update;
     new_task_block->task.priority       = priority;
